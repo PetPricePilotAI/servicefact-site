@@ -1,3 +1,43 @@
-self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", event => event.waitUntil(self.clients.claim()));
-// Intentionally no API/HTML caching until logout, revocation and device-storage risks are specified.
+const CACHE = "servicefact-shell-v2";
+const SHELL = ["/", "/work", "/demo", "/manifest.webmanifest"];
+self.addEventListener("install", (event) =>
+  event.waitUntil(
+    caches
+      .open(CACHE)
+      .then((cache) => cache.addAll(SHELL))
+      .then(() => self.skipWaiting())
+  )
+);
+self.addEventListener("activate", (event) =>
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
+      .then(() => self.clients.claim())
+  )
+);
+self.addEventListener("fetch", (event) => {
+  const request = event.request;
+  if (request.method !== "GET" || new URL(request.url).origin !== self.location.origin) return;
+  event.respondWith(
+    fetch(request)
+      .then((response) => {
+        if (
+          response.ok &&
+          (request.destination === "document" ||
+            ["script", "style", "font", "image"].includes(request.destination))
+        ) {
+          const copy = response.clone();
+          caches.open(CACHE).then((cache) => cache.put(request, copy));
+        }
+        return response;
+      })
+      .catch(() =>
+        caches
+          .match(request)
+          .then(
+            (cached) => cached || (request.destination === "document" ? caches.match("/work") : undefined)
+          )
+      )
+  );
+});
